@@ -21,7 +21,7 @@ def download_vectordb():
     st.info("🔄 데이터베이스 다운로드 중... (최초 1회, 1-2분 소요)")
     
     # 여기에 Google Drive ID 입력
-    gdrive_id = "1kePVG0mv_YL45DdgR0YPaQknpTWJetrV"  # 예: 1ABC123DEF456GHI789
+    gdrive_id = "1JaLtAm3Xyz2Ae70ucEL9UGven5EUBOBM"  # 예: 1ABC123DEF456GHI789
     
     try:
         # Google Drive에서 다운로드
