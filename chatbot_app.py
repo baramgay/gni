@@ -121,7 +121,7 @@ Step 5: 명확하고 자연스럽게 답변 작성
 
     url = (
         "https://generativelanguage.googleapis.com/v1/models/"
-        f"gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     )
 
     data = {
