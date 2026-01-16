@@ -235,7 +235,7 @@ def load_retriever(db_path: str):
 
     return vectorstore.as_retriever(
         search_type="similarity",
-        search_kwargs={"k": 10},
+        search_kwargs={"k": 20},
     )
 
 
@@ -325,7 +325,7 @@ with st.sidebar:
 
 ### 정보
 - 원규집: 2025.12.22
-- AI: Gemini 1.5 Flash
+- AI: Gemini 2.5 Flash
 - 대화 맥락: 최근 4턴
 - 논리적 추론 강화
 """
