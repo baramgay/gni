@@ -1,0 +1,33 @@
+streamlit==1.32.0
+langchain-community==0.4.1
+faiss-cpu==1.13.1
+sentence-transformers==2.2.2
+requests==2.32.5
+gdown==5.1.0
+```
+
+**3. 아래로 스크롤해서 초록색 "Commit new file" 버튼 클릭**
+
+완료!
+
+---
+
+## **다음: chatbot_app.py 업로드**
+
+**1. 다시 메인 화면으로 돌아가서 "Add file" 버튼 클릭 → "Upload files" 선택**
+
+**2. 그 전에! Google Drive에 벡터 DB 업로드 먼저**
+
+**Google Drive 작업:**
+
+1. `D:\faiss_gyeongnam_rules` 폴더를 찾기
+2. 폴더를 마우스 오른쪽 클릭 → "보내기" → "압축(ZIP) 폴더"
+3. `faiss_gyeongnam_rules.zip` 파일 생성됨
+4. Google Drive (https://drive.google.com) 열기
+5. 좌측 상단 "새로 만들기" → "파일 업로드"
+6. `faiss_gyeongnam_rules.zip` 업로드
+7. 업로드 완료 후 파일 우클릭 → "공유" → "링크 복사"
+
+**링크 예시:**
+```
+https://drive.google.com/file/d/1ABC123DEF456GHI789/view?usp=sharing
