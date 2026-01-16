@@ -71,7 +71,18 @@ def download_from_gdrive(file_id: str, destination: Path):
                 f.write(chunk)
 
 
-def generate_answer(question: str, context: str) -> str:
+def generate_answer(question: str, context: str, chat_history: list = None) -> str:
+    """
+    chat_history: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
+    """
+    
+    # 대화 이력을 텍스트로 변환 (최근 4턴 = 8개 메시지)
+    history_text = ""
+    if chat_history:
+        for msg in chat_history[-8:]:  # 최근 4턴(8개 메시지)만 사용
+            role = "사용자" if msg["role"] == "user" else "AI"
+            history_text += f"{role}: {msg['content']}\n\n"
+    
     prompt = f"""당신은 경남연구원의 규정 전문가입니다. 논리적 추론 능력을 발휘하여 정확하게 답변해주세요.
 
 **핵심 배경 지식:**
@@ -98,22 +109,27 @@ def generate_answer(question: str, context: str) -> str:
 **제공된 규정:**
 {context}
 
-**질문:** {question}
+**이전 대화 내역 (최근 4턴):**
+{history_text if history_text else "(없음)"}
+
+**현재 질문:** {question}
 
 **답변 작성 절차:**
-Step 1: 질문에서 언급된 지역이 창원인지 아닌지 먼저 판단
-Step 2: 관내/관외 분류 확정
-Step 3: 해당 분류에 적용되는 규정 찾기
-Step 4: 논리적 추론으로 구체적 금액/조건 도출
-Step 5: 명확하고 자연스럽게 답변 작성
+Step 1: 이전 대화를 참고하여 맥락 파악 (대명사 "그곳", "그럼" 등 해석)
+Step 2: 질문에서 언급된 지역이 창원인지 아닌지 먼저 판단
+Step 3: 관내/관외 분류 확정
+Step 4: 해당 분류에 적용되는 규정 찾기
+Step 5: 논리적 추론으로 구체적 금액/조건 도출
+Step 6: 명확하고 자연스럽게 답변 작성
 
 **답변 규칙:**
 1. 논리적 추론 과정을 자연스럽게 설명하되, "Step 1, Step 2" 같은 표현은 사용하지 마세요
-2. 구체적 금액, 조건을 반드시 명시
-3. 페이지 번호 인용
-4. 확실하지 않은 추정은 "⚠️ 원규집 재확인 필요" 표시
-5. 존댓말 사용
-6. 완결된 답변
+2. 이전 대화를 참고하되, 불필요하게 반복 설명하지 마세요
+3. 구체적 금액, 조건을 반드시 명시
+4. 페이지 번호 인용
+5. 확실하지 않은 추정은 "⚠️ 원규집 재확인 필요" 표시
+6. 존댓말 사용
+7. 완결된 답변
 
 **중요: 지나치게 보수적으로 답변하지 마세요. 논리적으로 명확하게 추론 가능하면 자신있게 답변하세요.**
 
@@ -127,7 +143,7 @@ Step 5: 명확하고 자연스럽게 답변 작성
     data = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 0.5,  # 0.4 → 0.5 (추론 능력 강화)
+            "temperature": 0.5,
             "maxOutputTokens": 8192,
             "topP": 0.95,
             "topK": 40,
@@ -280,7 +296,10 @@ if user_input:
                     ]
                 )
 
-                response = generate_answer(user_input, context)
+                # 이전 대화 이력 전달 (현재 질문 제외, 최근 4턴까지)
+                chat_history = st.session_state.messages[:-1]
+                response = generate_answer(user_input, context, chat_history)
+                
                 st.markdown(response)
 
                 with st.expander("📄 참고 규정"):
@@ -307,6 +326,7 @@ with st.sidebar:
 ### 정보
 - 원규집: 2025.12.22
 - AI: Gemini 1.5 Flash
+- 대화 맥락: 최근 4턴
 - 논리적 추론 강화
 """
     )
