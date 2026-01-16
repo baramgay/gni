@@ -1,29 +1,6 @@
-streamlit>=1.32.0
-langchain-community>=0.4.0
-faiss-cpu>=1.7.4
-sentence-transformers>=2.2.0
-requests>=2.31.0
-gdown>=4.7.1
-torch>=2.0.0
-```
-
-**4. "Commit changes" 클릭**
-
----
-
-## **또는 Python 버전 명시**
-
-`.streamlit/config.toml` 파일 추가가 필요할 수 있습니다.
-
-**GitHub에서:**
-
-**1. "Add file" → "Create new file" 클릭**
-
-**2. 파일명 입력:**
-```
-.python-version
-```
-
-**3. 내용:**
-```
-3.11
+streamlit==1.32.0
+langchain-community==0.4.1
+faiss-cpu==1.13.1
+sentence-transformers==2.2.2
+requests==2.32.5
+gdown==5.1.0
