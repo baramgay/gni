@@ -18,17 +18,12 @@ warnings.filterwarnings("ignore")
 APP_TITLE = "📚 경남연구원 규정집 챗봇"
 APP_CAPTION = "규정에 대해 궁금한 점을 물어보세요"
 
-# ✅ 사용자가 준 Google Drive ZIP 파일 ID
 GDRIVE_FILE_ID = "1JaLtAm3Xyz2Ae70ucEL9UGven5EUBOBM"
-
-# ZIP 저장/해제 경로
 ZIP_NAME = "faiss_db.zip"
-EXTRACT_ROOT_DIRNAME = "faiss_db_extracted"  # 충돌 방지용 폴더
-
-# ✅ 벡터DB 생성에 사용한 임베딩 모델과 반드시 동일해야 함
+EXTRACT_ROOT_DIRNAME = "faiss_db_extracted"
 EMBEDDING_MODEL_NAME = "jhgan/ko-sroberta-multitask"
 
-# ✅ API
+# Secrets에서 안전하게 가져오기
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 
@@ -40,13 +35,9 @@ def has_faiss_files(p: Path) -> bool:
 
 
 def find_faiss_dir(search_root: Path) -> Path:
-    """
-    unzip 결과에서 index.faiss를 찾아 실제 FAISS 폴더를 반환.
-    zip 내부 구조가 중첩 폴더여도 자동으로 잡습니다.
-    """
     candidates = [p.parent for p in search_root.rglob("index.faiss")]
     if not candidates:
-        raise FileNotFoundError("압축 해제 후 index.faiss를 찾지 못했습니다. (zip 내부 구조 확인 필요)")
+        raise FileNotFoundError("압축 해제 후 index.faiss를 찾지 못했습니다.")
 
     candidates.sort(key=lambda p: len(p.parts))
     real_dir = candidates[0]
@@ -57,9 +48,6 @@ def find_faiss_dir(search_root: Path) -> Path:
 
 
 def download_from_gdrive(file_id: str, destination: Path):
-    """
-    Google Drive confirm token(대용량/경고 페이지)을 처리해 실제 파일을 다운로드합니다.
-    """
     URL = "https://docs.google.com/uc?export=download"
     session = requests.Session()
 
@@ -84,47 +72,94 @@ def download_from_gdrive(file_id: str, destination: Path):
 
 
 def generate_answer(question: str, context: str) -> str:
-    prompt = f"""당신은 경남연구원의 규정 전문가입니다.
+    prompt = f"""당신은 경남연구원의 규정 전문가입니다. 논리적 추론 능력을 발휘하여 정확하게 답변해주세요.
 
-**배경:**
-- 경남연구원은 창원시에 위치
-- 관내출장: 창원시 내
-- 관외출장: 창원시 외 (부산, 김해 등)
+**핵심 배경 지식:**
+- 경남연구원 위치: 창원시
+- 관내출장: 창원시 내부
+- 관외출장: 창원시 외부 (부산, 김해, 진주, 서울, 제주도 등 창원이 아닌 모든 지역)
 
-**규정:**
+**논리적 추론 규칙:**
+1. 지역 분류 추론:
+   - 서울 = 창원 아님 → 관외출장
+   - 제주도 = 창원 아님 → 관외출장
+   - 부산 = 창원 아님 → 관외출장
+   - 모든 비창원 지역 = 관외출장
+
+2. 금액 적용 추론:
+   - 규정에 "서울 이외 지역 7만원"이 있다면
+   - 제주도는 "서울 이외 지역"에 포함됨 → 7만원 적용
+   - 부산도 "서울 이외 지역"에 포함됨 → 7만원 적용
+   
+3. 등급 적용 추론:
+   - 규정에 명시되지 않은 지역은 가장 가까운 유사 등급 적용
+   - "국외만 등급 표시"라면 → 국내는 별도 기준 적용
+
+**제공된 규정:**
 {context}
 
 **질문:** {question}
 
-**지침:**
-1. 자연스럽게 답변
-2. 구체적 금액, 조건 명시
-3. 페이지 인용
-4. 추정 내용은 "⚠️ 원규집 재확인 필요" 표시
+**답변 작성 절차:**
+Step 1: 질문에서 언급된 지역이 창원인지 아닌지 먼저 판단
+Step 2: 관내/관외 분류 확정
+Step 3: 해당 분류에 적용되는 규정 찾기
+Step 4: 논리적 추론으로 구체적 금액/조건 도출
+Step 5: 명확하고 자연스럽게 답변 작성
+
+**답변 규칙:**
+1. 논리적 추론 과정을 자연스럽게 설명하되, "Step 1, Step 2" 같은 표현은 사용하지 마세요
+2. 구체적 금액, 조건을 반드시 명시
+3. 페이지 번호 인용
+4. 확실하지 않은 추정은 "⚠️ 원규집 재확인 필요" 표시
 5. 존댓말 사용
 6. 완결된 답변
+
+**중요: 지나치게 보수적으로 답변하지 마세요. 논리적으로 명확하게 추론 가능하면 자신있게 답변하세요.**
 
 **답변:**"""
 
     url = (
         "https://generativelanguage.googleapis.com/v1/models/"
-        f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+        f"gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     )
 
     data = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192},
+        "generationConfig": {
+            "temperature": 0.5,  # 0.4 → 0.5 (추론 능력 강화)
+            "maxOutputTokens": 8192,
+            "topP": 0.95,
+            "topK": 40,
+        },
     }
 
-    try:
-        r = requests.post(url, json=data, timeout=60)
-        if r.status_code == 200:
-            result = r.json()
-            if "candidates" in result and result["candidates"]:
-                return result["candidates"][0]["content"]["parts"][0]["text"]
-        return f"오류 발생 (Gemini 응답 실패, status={r.status_code}): {r.text[:500]}"
-    except Exception as e:
-        return f"오류: {e}"
+    # 재시도 로직
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            r = requests.post(url, json=data, timeout=60)
+            
+            if r.status_code == 200:
+                result = r.json()
+                if "candidates" in result and result["candidates"]:
+                    return result["candidates"][0]["content"]["parts"][0]["text"]
+            
+            if r.status_code == 503 and attempt < max_retries - 1:
+                import time
+                time.sleep((attempt + 1) * 2)
+                continue
+            
+            return f"⚠️ Gemini API 오류 (status={r.status_code}): 잠시 후 다시 시도해주세요."
+            
+        except Exception as e:
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(2)
+                continue
+            return f"⚠️ 오류 발생: 잠시 후 다시 시도해주세요."
+    
+    return "⚠️ 서버가 혼잡합니다. 잠시 후 다시 시도해주세요."
 
 
 # =========================
@@ -132,16 +167,10 @@ def generate_answer(question: str, context: str) -> str:
 # =========================
 @st.cache_resource
 def prepare_vectordb() -> str:
-    """
-    1) 이미 unzip되어 index.faiss/index.pkl이 있으면 그 경로 반환
-    2) 없으면 Drive에서 ZIP 다운로드 -> zip 검증 -> unzip
-    3) unzip 결과에서 index.faiss 위치 탐색 후 그 폴더 반환
-    """
     base = Path(".").resolve()
     extract_root = base / EXTRACT_ROOT_DIRNAME
     zip_path = base / ZIP_NAME
 
-    # 이미 풀려있으면 재다운로드/재해제 안 함
     if extract_root.exists():
         try:
             real_dir = find_faiss_dir(extract_root)
@@ -151,31 +180,26 @@ def prepare_vectordb() -> str:
 
     st.info("🔄 데이터베이스 다운로드 중... (최초 1회, 1~2분 소요)")
 
-    # 다운로드
     download_from_gdrive(GDRIVE_FILE_ID, zip_path)
 
-    # ZIP 무결성 검증 (HTML 저장 방지)
     if not zipfile.is_zipfile(zip_path):
         head = zip_path.read_bytes()[:300]
         raise RuntimeError(
-            "다운로드된 파일이 ZIP이 아닙니다. (권한/쿼터/경고 페이지가 내려왔을 가능성)\n"
-            f"파일 앞부분(바이트): {head!r}\n"
-            "Drive 공유 설정이 '링크가 있는 모든 사용자(Anyone with the link)'인지 확인하세요."
+            "다운로드된 파일이 ZIP이 아닙니다.\n"
+            "Drive 공유 설정이 '링크가 있는 모든 사용자'인지 확인하세요."
         )
 
-    # unzip
     extract_root.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "r") as z:
         z.extractall(extract_root)
 
-    # zip 제거(원하면 유지해도 됨)
     try:
         zip_path.unlink()
     except Exception:
         pass
 
     real_dir = find_faiss_dir(extract_root)
-    st.success("✅ 준비 완료! (FAISS 인덱스 확인)")
+    st.success("✅ 준비 완료!")
     return str(real_dir)
 
 
@@ -211,7 +235,6 @@ st.set_page_config(
 st.title(APP_TITLE)
 st.caption(APP_CAPTION)
 
-# 벡터 DB 준비
 try:
     db_path = prepare_vectordb()
 except Exception as e:
@@ -219,31 +242,26 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-# Retriever 로드
 with st.spinner("초기화 중..."):
     try:
         retriever = load_retriever(db_path)
     except Exception as e:
-        st.error("초기화 실패 (FAISS 로드 실패)")
+        st.error("초기화 실패")
         st.exception(e)
         st.stop()
 
-# Gemini Key 체크(빈 값 방지)
 if not GEMINI_API_KEY or not GEMINI_API_KEY.strip():
-    st.error("GEMINI_API_KEY가 비어 있습니다. 코드 상단의 GEMINI_API_KEY 값을 확인하세요.")
+    st.error("GEMINI_API_KEY가 비어 있습니다.")
     st.stop()
 
-# 세션 상태
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 대화 표시
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 사용자 입력
-user_input = st.chat_input("질문 입력 (예: 부산 출장비는?)")
+user_input = st.chat_input("질문 입력 (예: 제주도 출장 숙박비는?)")
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
@@ -276,19 +294,20 @@ if user_input:
                 st.error("오류 발생")
                 st.exception(e)
 
-# 사이드바
 with st.sidebar:
     st.header("📋 사용 안내")
     st.markdown(
         """
 ### 질문 예시
-- 부산 출장 시 여비는?
+- 제주도 출장 숙박비는?
+- 서울 출장 시 일비는?
+- 부산 관외출장 식비는?
 - 연차 규정은?
-- 경조사 휴가는?
 
 ### 정보
 - 원규집: 2025.12.22
-- AI: Gemini 2.5 Flash
+- AI: Gemini 1.5 Flash
+- 논리적 추론 강화
 """
     )
 
