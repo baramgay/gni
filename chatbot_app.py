@@ -93,9 +93,9 @@ def get_gemini_key() -> str:
     - Settings > Secrets 에 GEMINI_API_KEY 저장
     또는 환경변수 GEMINI_API_KEY 사용
     """
-    if "AIzaSyBJcMn59KUl-937xdj00pXsEIHUpkeTTnA" in st.secrets:
-        return st.secrets["AIzaSyBJcMn59KUl-937xdj00pXsEIHUpkeTTnA"]
-    return os.environ.get("AIzaSyBJcMn59KUl-937xdj00pXsEIHUpkeTTnA", "")
+    if "GEMINI_API_KEY" in st.secrets:
+        return st.secrets["GEMINI_API_KEY"]
+    return os.environ.get("GEMINI_API_KEY", "")
 
 
 def generate_answer(question: str, context: str, gemini_api_key: str) -> str:
