@@ -18,15 +18,18 @@ warnings.filterwarnings("ignore")
 APP_TITLE = "📚 경남연구원 규정집 챗봇"
 APP_CAPTION = "규정에 대해 궁금한 점을 물어보세요"
 
-# ✅ 사용자가 준 Google Drive 파일 ID (ZIP)
+# ✅ 사용자가 준 Google Drive ZIP 파일 ID
 GDRIVE_FILE_ID = "1JaLtAm3Xyz2Ae70ucEL9UGven5EUBOBM"
 
 # ZIP 저장/해제 경로
 ZIP_NAME = "faiss_db.zip"
-EXTRACT_ROOT_DIRNAME = "faiss_db_extracted"  # 압축을 여기에 풉니다(충돌 방지)
+EXTRACT_ROOT_DIRNAME = "faiss_db_extracted"  # 충돌 방지용 폴더
 
 # ✅ 벡터DB 생성에 사용한 임베딩 모델과 반드시 동일해야 함
 EMBEDDING_MODEL_NAME = "jhgan/ko-sroberta-multitask"
+
+# ✅ 요청대로: Secrets 없이 하드코딩
+GEMINI_API_KEY = "AIzaSyBJcMn59KUl-937xdj00pXsEIHUpkeTTnA"
 
 
 # =========================
@@ -38,17 +41,13 @@ def has_faiss_files(p: Path) -> bool:
 
 def find_faiss_dir(search_root: Path) -> Path:
     """
-    unzip 결과에서 index.faiss를 찾아 실제 FAISS 폴더를 반환합니다.
-    zip 내부 구조가
-      - faiss_gyeongnam_rules/index.faiss
-      - faiss_gyeongnam_rules/faiss_gyeongnam_rules/index.faiss
-    처럼 달라도 자동으로 잡습니다.
+    unzip 결과에서 index.faiss를 찾아 실제 FAISS 폴더를 반환.
+    zip 내부 구조가 중첩 폴더여도 자동으로 잡습니다.
     """
     candidates = [p.parent for p in search_root.rglob("index.faiss")]
     if not candidates:
         raise FileNotFoundError("압축 해제 후 index.faiss를 찾지 못했습니다. (zip 내부 구조 확인 필요)")
 
-    # 가장 얕은 경로를 우선
     candidates.sort(key=lambda p: len(p.parts))
     real_dir = candidates[0]
 
@@ -59,8 +58,7 @@ def find_faiss_dir(search_root: Path) -> Path:
 
 def download_from_gdrive(file_id: str, destination: Path):
     """
-    Google Drive의 confirm token(대용량/경고 페이지)을 처리해
-    실제 파일 바이너리를 다운로드합니다.
+    Google Drive confirm token(대용량/경고 페이지)을 처리해 실제 파일을 다운로드합니다.
     """
     URL = "https://docs.google.com/uc?export=download"
     session = requests.Session()
@@ -68,7 +66,6 @@ def download_from_gdrive(file_id: str, destination: Path):
     resp = session.get(URL, params={"id": file_id}, stream=True, timeout=120)
     resp.raise_for_status()
 
-    # confirm token 찾기
     token = None
     for k, v in resp.cookies.items():
         if k.startswith("download_warning"):
@@ -79,7 +76,6 @@ def download_from_gdrive(file_id: str, destination: Path):
         resp = session.get(URL, params={"id": file_id, "confirm": token}, stream=True, timeout=120)
         resp.raise_for_status()
 
-    # 저장
     destination.parent.mkdir(parents=True, exist_ok=True)
     with open(destination, "wb") as f:
         for chunk in resp.iter_content(chunk_size=1024 * 1024):
@@ -87,18 +83,7 @@ def download_from_gdrive(file_id: str, destination: Path):
                 f.write(chunk)
 
 
-def get_gemini_key() -> str:
-    """
-    Streamlit Cloud 권장:
-    - Settings > Secrets 에 GEMINI_API_KEY 저장
-    또는 환경변수 GEMINI_API_KEY 사용
-    """
-    if "GEMINI_API_KEY" in st.secrets:
-        return st.secrets["GEMINI_API_KEY"]
-    return os.environ.get("GEMINI_API_KEY", "")
-
-
-def generate_answer(question: str, context: str, gemini_api_key: str) -> str:
+def generate_answer(question: str, context: str) -> str:
     prompt = f"""당신은 경남연구원의 규정 전문가입니다.
 
 **배경:**
@@ -123,7 +108,7 @@ def generate_answer(question: str, context: str, gemini_api_key: str) -> str:
 
     url = (
         "https://generativelanguage.googleapis.com/v1/models/"
-        f"gemini-2.5-flash:generateContent?key={gemini_api_key}"
+        f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     )
 
     data = {
@@ -162,7 +147,6 @@ def prepare_vectordb() -> str:
             real_dir = find_faiss_dir(extract_root)
             return str(real_dir)
         except Exception:
-            # extract_root가 있어도 깨졌을 수 있으니 아래로 진행
             pass
 
     st.info("🔄 데이터베이스 다운로드 중... (최초 1회, 1~2분 소요)")
@@ -170,9 +154,8 @@ def prepare_vectordb() -> str:
     # 다운로드
     download_from_gdrive(GDRIVE_FILE_ID, zip_path)
 
-    # ✅ HTML을 zip으로 착각하는 문제 방지
+    # ZIP 무결성 검증 (HTML 저장 방지)
     if not zipfile.is_zipfile(zip_path):
-        # 내용 일부를 보여주면 원인 파악에 도움(권한/경고/HTML)
         head = zip_path.read_bytes()[:300]
         raise RuntimeError(
             "다운로드된 파일이 ZIP이 아닙니다. (권한/쿼터/경고 페이지가 내려왔을 가능성)\n"
@@ -245,10 +228,9 @@ with st.spinner("초기화 중..."):
         st.exception(e)
         st.stop()
 
-# Gemini Key
-GEMINI_API_KEY = get_gemini_key()
-if not GEMINI_API_KEY:
-    st.error("GEMINI_API_KEY가 설정되지 않았습니다. Streamlit Secrets 또는 환경변수로 설정하세요.")
+# Gemini Key 체크(빈 값 방지)
+if not GEMINI_API_KEY or not GEMINI_API_KEY.strip():
+    st.error("GEMINI_API_KEY가 비어 있습니다. 코드 상단의 GEMINI_API_KEY 값을 확인하세요.")
     st.stop()
 
 # 세션 상태
@@ -280,7 +262,7 @@ if user_input:
                     ]
                 )
 
-                response = generate_answer(user_input, context, GEMINI_API_KEY)
+                response = generate_answer(user_input, context)
                 st.markdown(response)
 
                 with st.expander("📄 참고 규정"):
