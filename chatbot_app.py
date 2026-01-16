@@ -29,7 +29,7 @@ EXTRACT_ROOT_DIRNAME = "faiss_db_extracted"  # 충돌 방지용 폴더
 EMBEDDING_MODEL_NAME = "jhgan/ko-sroberta-multitask"
 
 # ✅ 요청대로: Secrets 없이 하드코딩
-GEMINI_API_KEY = "AIzaSyBJcMn59KUl-937xdj00pXsEIHUpkeTTnA"
+GEMINI_API_KEY = "AIzaSyAPiNKl3uZwB6oVmE2pFmq4BshgvquvoDw"
 
 
 # =========================
