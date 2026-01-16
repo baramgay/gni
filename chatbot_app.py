@@ -1,12 +1,10 @@
 import os
-import json
 import warnings
 import zipfile
 from pathlib import Path
 
 import streamlit as st
 import requests
-import gdown
 
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -14,38 +12,43 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 warnings.filterwarnings("ignore")
 
 
-# -----------------------------
-# Config
-# -----------------------------
+# =========================
+# 설정값
+# =========================
 APP_TITLE = "📚 경남연구원 규정집 챗봇"
 APP_CAPTION = "규정에 대해 궁금한 점을 물어보세요"
 
-# 기대 폴더명(zip이 이 이름으로 풀리는 경우가 많음)
-EXPECTED_DB_DIRNAME = "faiss_gyeongnam_rules"
+# ✅ 사용자가 준 Google Drive 파일 ID (ZIP)
+GDRIVE_FILE_ID = "1JaLtAm3Xyz2Ae70ucEL9UGven5EUBOBM"
+
+# ZIP 저장/해제 경로
 ZIP_NAME = "faiss_db.zip"
+EXTRACT_ROOT_DIRNAME = "faiss_db_extracted"  # 압축을 여기에 풉니다(충돌 방지)
 
-# Google Drive 파일 ID (여기에 본인 DB zip의 ID)
-GDRIVE_ID = "1kePVG0mv_YL45DdgR0YPaQknpTWJetrV"
-
-# HuggingFace 임베딩 모델 (DB 생성 때 사용한 것과 반드시 동일해야 함)
+# ✅ 벡터DB 생성에 사용한 임베딩 모델과 반드시 동일해야 함
 EMBEDDING_MODEL_NAME = "jhgan/ko-sroberta-multitask"
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
+# =========================
+# 유틸 함수
+# =========================
 def has_faiss_files(p: Path) -> bool:
-    """FAISS load_local에 필요한 기본 파일이 있는지 확인."""
     return (p / "index.faiss").exists() and (p / "index.pkl").exists()
 
 
 def find_faiss_dir(search_root: Path) -> Path:
-    """index.faiss를 기준으로 실제 FAISS 폴더를 탐색해 반환."""
+    """
+    unzip 결과에서 index.faiss를 찾아 실제 FAISS 폴더를 반환합니다.
+    zip 내부 구조가
+      - faiss_gyeongnam_rules/index.faiss
+      - faiss_gyeongnam_rules/faiss_gyeongnam_rules/index.faiss
+    처럼 달라도 자동으로 잡습니다.
+    """
     candidates = [p.parent for p in search_root.rglob("index.faiss")]
     if not candidates:
         raise FileNotFoundError("압축 해제 후 index.faiss를 찾지 못했습니다. (zip 내부 구조 확인 필요)")
 
-    # 가장 상위(얕은) 폴더를 우선 사용
+    # 가장 얕은 경로를 우선
     candidates.sort(key=lambda p: len(p.parts))
     real_dir = candidates[0]
 
@@ -54,94 +57,41 @@ def find_faiss_dir(search_root: Path) -> Path:
     return real_dir
 
 
-# -----------------------------
-# Vector DB download/unzip
-# -----------------------------
-@st.cache_resource
-def prepare_vectordb() -> str:
+def download_from_gdrive(file_id: str, destination: Path):
     """
-    1) 이미 로컬에 index.faiss/index.pkl이 있으면 그 경로 반환
-    2) 없으면 gdown으로 zip 다운로드 후 압축 해제
-    3) 압축 해제 결과에서 실제 index.faiss 위치를 찾아 그 경로 반환
+    Google Drive의 confirm token(대용량/경고 페이지)을 처리해
+    실제 파일 바이너리를 다운로드합니다.
     """
-    base = Path(".").resolve()
-    expected = base / EXPECTED_DB_DIRNAME
-    zip_path = base / ZIP_NAME
+    URL = "https://docs.google.com/uc?export=download"
+    session = requests.Session()
 
-    # ✅ 폴더가 "존재"가 아니라, 필수 파일이 "존재"할 때만 준비 완료
-    if expected.exists() and has_faiss_files(expected):
-        return str(expected)
+    resp = session.get(URL, params={"id": file_id}, stream=True, timeout=120)
+    resp.raise_for_status()
 
-    # 혹시 이전 실행에서 다른 위치에 이미 풀린 경우까지 탐색
-    try:
-        already = find_faiss_dir(base)
-        return str(already)
-    except Exception:
-        pass
+    # confirm token 찾기
+    token = None
+    for k, v in resp.cookies.items():
+        if k.startswith("download_warning"):
+            token = v
+            break
 
-    st.info("🔄 데이터베이스 다운로드 중... (최초 1회, 1-2분 소요)")
+    if token:
+        resp = session.get(URL, params={"id": file_id, "confirm": token}, stream=True, timeout=120)
+        resp.raise_for_status()
 
-    url = f"https://drive.google.com/uc?id={GDRIVE_ID}"
-
-    try:
-        # 다운로드
-        gdown.download(url, str(zip_path), quiet=False)
-
-        # 압축 해제
-        with zipfile.ZipFile(zip_path, "r") as z:
-            z.extractall(base)
-
-        # zip 제거
-        if zip_path.exists():
-            zip_path.unlink()
-
-        # 실제 FAISS 폴더 찾기
-        real_dir = find_faiss_dir(base)
-
-        st.success("✅ 준비 완료! (FAISS 인덱스 확인)")
-        return str(real_dir)
-
-    except Exception as e:
-        st.error("다운로드/초기화 실패")
-        st.exception(e)
-        st.stop()
+    # 저장
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with open(destination, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                f.write(chunk)
 
 
-# -----------------------------
-# Load retriever
-# -----------------------------
-@st.cache_resource
-def load_retriever(db_path: str):
-    """
-    db_path를 인자로 받아야 cache_resource가 올바르게 동작합니다.
-    """
-    embeddings = HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL_NAME,
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True},
-    )
-
-    vectorstore = FAISS.load_local(
-        db_path,
-        embeddings,
-        allow_dangerous_deserialization=True,
-    )
-
-    retriever = vectorstore.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": 10},
-    )
-    return retriever
-
-
-# -----------------------------
-# Gemini
-# -----------------------------
 def get_gemini_key() -> str:
     """
     Streamlit Cloud 권장:
-    - Settings > Secrets 에 GEMINI_API_KEY 저장 후 st.secrets로 읽기
-    또는 환경변수 사용
+    - Settings > Secrets 에 GEMINI_API_KEY 저장
+    또는 환경변수 GEMINI_API_KEY 사용
     """
     if "GEMINI_API_KEY" in st.secrets:
         return st.secrets["GEMINI_API_KEY"]
@@ -171,33 +121,104 @@ def generate_answer(question: str, context: str, gemini_api_key: str) -> str:
 
 **답변:**"""
 
+    url = (
+        "https://generativelanguage.googleapis.com/v1/models/"
+        f"gemini-2.5-flash:generateContent?key={gemini_api_key}"
+    )
+
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192},
+    }
+
     try:
-        url = (
-            "https://generativelanguage.googleapis.com/v1/models/"
-            f"gemini-2.5-flash:generateContent?key={gemini_api_key}"
-        )
-        data = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192},
-        }
-
-        response = requests.post(url, json=data, timeout=60)
-
-        if response.status_code == 200:
-            result = response.json()
+        r = requests.post(url, json=data, timeout=60)
+        if r.status_code == 200:
+            result = r.json()
             if "candidates" in result and result["candidates"]:
                 return result["candidates"][0]["content"]["parts"][0]["text"]
-
-        # 실패 시 상세 메시지 반환
-        return f"오류 발생 (Gemini 응답 실패, status={response.status_code}): {response.text[:500]}"
-
+        return f"오류 발생 (Gemini 응답 실패, status={r.status_code}): {r.text[:500]}"
     except Exception as e:
         return f"오류: {e}"
 
 
-# -----------------------------
+# =========================
+# Vector DB 준비
+# =========================
+@st.cache_resource
+def prepare_vectordb() -> str:
+    """
+    1) 이미 unzip되어 index.faiss/index.pkl이 있으면 그 경로 반환
+    2) 없으면 Drive에서 ZIP 다운로드 -> zip 검증 -> unzip
+    3) unzip 결과에서 index.faiss 위치 탐색 후 그 폴더 반환
+    """
+    base = Path(".").resolve()
+    extract_root = base / EXTRACT_ROOT_DIRNAME
+    zip_path = base / ZIP_NAME
+
+    # 이미 풀려있으면 재다운로드/재해제 안 함
+    if extract_root.exists():
+        try:
+            real_dir = find_faiss_dir(extract_root)
+            return str(real_dir)
+        except Exception:
+            # extract_root가 있어도 깨졌을 수 있으니 아래로 진행
+            pass
+
+    st.info("🔄 데이터베이스 다운로드 중... (최초 1회, 1~2분 소요)")
+
+    # 다운로드
+    download_from_gdrive(GDRIVE_FILE_ID, zip_path)
+
+    # ✅ HTML을 zip으로 착각하는 문제 방지
+    if not zipfile.is_zipfile(zip_path):
+        # 내용 일부를 보여주면 원인 파악에 도움(권한/경고/HTML)
+        head = zip_path.read_bytes()[:300]
+        raise RuntimeError(
+            "다운로드된 파일이 ZIP이 아닙니다. (권한/쿼터/경고 페이지가 내려왔을 가능성)\n"
+            f"파일 앞부분(바이트): {head!r}\n"
+            "Drive 공유 설정이 '링크가 있는 모든 사용자(Anyone with the link)'인지 확인하세요."
+        )
+
+    # unzip
+    extract_root.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(extract_root)
+
+    # zip 제거(원하면 유지해도 됨)
+    try:
+        zip_path.unlink()
+    except Exception:
+        pass
+
+    real_dir = find_faiss_dir(extract_root)
+    st.success("✅ 준비 완료! (FAISS 인덱스 확인)")
+    return str(real_dir)
+
+
+@st.cache_resource
+def load_retriever(db_path: str):
+    embeddings = HuggingFaceEmbeddings(
+        model_name=EMBEDDING_MODEL_NAME,
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
+    )
+
+    vectorstore = FAISS.load_local(
+        db_path,
+        embeddings,
+        allow_dangerous_deserialization=True,
+    )
+
+    return vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 10},
+    )
+
+
+# =========================
 # Streamlit UI
-# -----------------------------
+# =========================
 st.set_page_config(
     page_title="경남연구원 규정집 챗봇",
     page_icon="📚",
@@ -207,10 +228,15 @@ st.set_page_config(
 st.title(APP_TITLE)
 st.caption(APP_CAPTION)
 
-# 1) 벡터 DB 준비
-db_path = prepare_vectordb()
+# 벡터 DB 준비
+try:
+    db_path = prepare_vectordb()
+except Exception as e:
+    st.error("다운로드/초기화 실패")
+    st.exception(e)
+    st.stop()
 
-# 2) Retriever 로드
+# Retriever 로드
 with st.spinner("초기화 중..."):
     try:
         retriever = load_retriever(db_path)
@@ -219,10 +245,10 @@ with st.spinner("초기화 중..."):
         st.exception(e)
         st.stop()
 
-# 3) Gemini API 키 로드
+# Gemini Key
 GEMINI_API_KEY = get_gemini_key()
 if not GEMINI_API_KEY:
-    st.error("GEMINI_API_KEY가 설정되지 않았습니다. (Streamlit Secrets 또는 환경변수로 설정 필요)")
+    st.error("GEMINI_API_KEY가 설정되지 않았습니다. Streamlit Secrets 또는 환경변수로 설정하세요.")
     st.stop()
 
 # 세션 상태
