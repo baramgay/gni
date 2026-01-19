@@ -302,10 +302,34 @@ if user_input:
                 
                 st.markdown(response)
 
-                with st.expander("📄 참고 규정"):
-                    for i, doc in enumerate(docs, 1):
-                        st.markdown(f"**[{i}] 페이지 {doc.metadata.get('page', 'N/A')}**")
-                        st.text((doc.page_content or "")[:400] + "...")
+                # 개선된 참고 규정 표시
+                with st.expander("📄 참고한 규정 원문 보기"):
+                    # 페이지 번호로 그룹화
+                    page_groups = {}
+                    for doc in docs:
+                        page = doc.metadata.get('page', 'N/A')
+                        if page not in page_groups:
+                            page_groups[page] = []
+                        page_groups[page].append(doc.page_content)
+                    
+                    # 페이지 번호 순으로 정렬하여 표시
+                    for page in sorted(page_groups.keys(), 
+                                     key=lambda x: int(x) if str(x).isdigit() else float('inf')):
+                        st.markdown(f"### 📄 페이지 {page}")
+                        
+                        # 해당 페이지의 모든 내용을 하나로 합치기
+                        combined_content = "\n\n---\n\n".join(page_groups[page])
+                        
+                        # 내용이 너무 길면 축약
+                        max_length = 800
+                        if len(combined_content) > max_length:
+                            display_content = combined_content[:max_length] + "\n\n... (이하 생략)"
+                        else:
+                            display_content = combined_content
+                        
+                        # 코드 블록으로 깔끔하게 표시
+                        st.markdown(f"```\n{display_content}\n```")
+                        st.markdown("---")
 
                 st.session_state.messages.append({"role": "assistant", "content": response})
 
@@ -328,9 +352,14 @@ with st.sidebar:
 - AI: Gemini 2.5 Flash
 - 대화 맥락: 최근 4턴
 - 논리적 추론 강화
+
+### 개선사항
+- 참고 규정을 페이지별로 그룹화
+- 중복 내용 제거
+- 깔끔한 레이아웃
 """
     )
 
-    if st.button("🔄 초기화"):
+    if st.button("🔄 대화 초기화"):
         st.session_state.messages = []
         st.rerun()
